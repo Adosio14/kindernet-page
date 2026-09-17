@@ -918,18 +918,19 @@ class KinderNet extends React.Component{
                                     label="Grande" />
                                 </RadioGroup>
                             </Grid>
-                            <Grid container justifyContent='center' alignItems='center' direction='column' pb={1}>
-                                <FormControlLabel control={<Switch checked={this.state.low_perf} onChange={(e)=>{this.handleLowPerfChange(e.target.checked)}}/>}
-                                    label="Modo bajo rendimiento" />
-                                {this.state.low_perf &&
-                                    <Typography variant="caption" color="text.secondary" px={2}>Las fotos se guardan sin entrenar. Cuando termines, tocá Entrenar.</Typography>}
-                                {this.state.low_perf &&
-                                    <Button variant="contained" onClick={this.handleTrainNow} disabled={!this.enoughSamples() || this.state.is_training} sx={{mt: 1}}>
+                            <Grid container justifyContent='center' alignItems='center'>
+                                <FormControlLabel labelPlacement="start" sx={{mx: 0}} label="Modo bajo rendimiento"
+                                    control={<Switch checked={this.state.low_perf} onChange={(e)=>{this.handleLowPerfChange(e.target.checked)}}/>} />
+                            </Grid>
+                            {this.state.low_perf &&
+                                <Box px={1.5} pb={1.5}>
+                                    <Typography variant="caption" display="block" color="text.secondary">Las fotos se guardan sin entrenar. Cuando termines, tocá Entrenar.</Typography>
+                                    <Button fullWidth variant="contained" sx={{mt: 1}} onClick={this.handleTrainNow} disabled={!this.enoughSamples() || this.state.is_training}>
                                         {this.state.is_training ? "Aprendiendo..." : "Entrenar"}
-                                    </Button>}
-                                {this.state.low_perf && !this.enoughSamples() &&
-                                    <Typography variant="caption" color="text.secondary">Cada cosa necesita al menos {MIN_SAMPLES} fotos</Typography>}
-                            </Grid> 
+                                    </Button>
+                                    {!this.enoughSamples() &&
+                                        <Typography variant="caption" display="block" color="text.secondary" sx={{mt: 0.5}}>Cada cosa necesita al menos {MIN_SAMPLES} fotos</Typography>}
+                                </Box>} 
                         </Card>
                         
                     </Grid>
