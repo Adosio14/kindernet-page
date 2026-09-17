@@ -10,7 +10,7 @@ import FolderOpenIcon from '@mui/icons-material/FolderOpen';
 import CategoryList from "./CategoryList"
 import ImagesList from "./ImagesList"
 import { Network } from './NeuralNetwork';
-import {height, unit_sep, use_timer, base_timer, batch_size, train_epochs, train_debounce, use_shape_uniforms} from './constants';
+import {height, unit_sep, use_timer, base_timer, batch_size, train_epochs, train_debounce, use_shape_uniforms, feature_chunk} from './constants';
 import Avatar from '@mui/material/Avatar';
 import logo from "./ia.png"
 import sinclogo from "./sinc-logo.png"
@@ -205,6 +205,7 @@ class KinderNet extends React.Component{
             const modelKey = `kindernet_model_${Date.now()}`
             await window.classifier.save(`indexeddb://${modelKey}`)
             
+            this.ensureFeatures()
             // Convert tensors to arrays for serialization
             const trainTensorsData = window.train_tensors ? await window.train_tensors.array() : null
             const trainFeaturesData = window.train_features ? await window.train_features.array() : null
@@ -467,7 +468,8 @@ class KinderNet extends React.Component{
                 const cols = Array.from(Array(old[2].shape[1]).keys()).filter(c => c !== drop_column)
                 labels = rows.length > 0 ? labels.gather(tf.tensor1d(cols, 'int32'), 1) : tf.zeros([0, cols.length])
             }
-            return [gather(old[0], rows), gather(old[1], rows), labels]
+            // los rasgos pueden faltar para las últimas filas
+            return [gather(old[0], rows), gather(old[1], rows.filter(i => i < old[1].shape[0])), labels]
         })
         old.forEach(t => this.disposeLater(t))
         window[set + '_tensors'] = tensors
@@ -595,6 +597,8 @@ class KinderNet extends React.Component{
 
         const model = window.classifier
         const net_size = this.state.net_size
+        if(net_size === 2)
+            this.ensureFeatures()
         const train_input = net_size < 2 ? window.train_tensors : window.train_features
         const [train_x, train_y] = this.padToBatch(train_input, window.train_labels)
 
@@ -613,6 +617,23 @@ class KinderNet extends React.Component{
             this.setState({is_training: false})
             if(this.train_pending)
                 this.trainClassifier()
+        }
+    }
+
+    // rasgos de MobileNet que falten, de a feature_chunk fotos
+    ensureFeatures(){
+        for(const set of ['train', 'test']){
+            const tensors = window[set + '_tensors']
+            while(window[set + '_features'].shape[0] < tensors.shape[0]){
+                const old = window[set + '_features']
+                const start = old.shape[0]
+                const n = Math.min(feature_chunk, tensors.shape[0] - start)
+                window[set + '_features'] = tf.tidy(() => {
+                    const chunk = tensors.slice([start, 0, 0, 0], [n, -1, -1, -1])
+                    return tf.concat([old, window.mobilenet.infer(chunk, true)])
+                })
+                this.disposeLater(old)
+            }
         }
     }
 
@@ -641,7 +662,7 @@ class KinderNet extends React.Component{
         if(this.state.output_on !== -1)
             return
         const frame = this.captureFrame()
-        if(!frame || !window.mobilenet)
+        if(!frame)
             return
 
         let images = this.state.images
@@ -651,16 +672,14 @@ class KinderNet extends React.Component{
 
         // las primeras TEST_SAMPLES fotos van al conjunto de prueba
         const set = n_samples[category] <= TEST_SAMPLES ? 'test' : 'train'
-        const old = [window[set + '_tensors'], window[set + '_features'], window[set + '_labels']]
-        const [tensors, features, labels] = tf.tidy(() => {
-            const pixels = tf.browser.fromPixels(frame.imageData).expandDims(0)
-            const feature = window.mobilenet.infer(pixels, true)
+        const old = [window[set + '_tensors'], window[set + '_labels']]
+        const [tensors, labels] = tf.tidy(() => {
+            const pixels = tf.browser.fromPixels(frame.imageData).expandDims(0).toFloat()
             const label = tf.oneHot(category, this.state.category_names.length).toFloat().expandDims(0)
-            return [tf.concat([old[0], pixels.toFloat()]), tf.concat([old[1], feature]), tf.concat([old[2], label])]
+            return [tf.concat([old[0], pixels]), tf.concat([old[1], label])]
         })
         old.forEach(t => this.disposeLater(t))
         window[set + '_tensors'] = tensors
-        window[set + '_features'] = features
         window[set + '_labels'] = labels
 
         this.setState({n_samples, output_on: category, images})

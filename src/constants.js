@@ -17,3 +17,4 @@ export const batch_size = 8             // lote de tamaño fijo, igual al origin
 export const train_epochs = 10
 export const train_debounce = 1500      // ms sin fotos nuevas antes de entrenar
 export const use_shape_uniforms = false // WEBGL_USE_SHAPES_UNIFORMS (opcional; con lotes fijos casi no hace falta)
+export const feature_chunk = 4          // fotos por tanda al calcular rasgos de MobileNet
