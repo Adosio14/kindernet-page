@@ -76,6 +76,7 @@ class KinderNet extends React.Component{
         this.train_pending = false
         this.train_timer = null
         this.classify_timer = null
+        this.output_timer = null
         this.pending_dispose = []
         this.captureGlobalEvent = this.captureGlobalEvent.bind(this);
         this.handleTransitionEnd = this.handleTransitionEnd.bind(this);
@@ -179,28 +180,10 @@ class KinderNet extends React.Component{
         mobilenet.load().then((net) => {
             window.mobilenet = net
             this.setState({listen_keys: true})
-            if(!this.state.low_perf)
-                this.warmUp()
         })
 
         this.resetValues()
         this.loadSavedStatesList()
-    }
-
-    // precompila los shaders del entrenamiento con un modelo descartable
-    async warmUp(){
-        const model = this.defineNet(0, 2)
-        const x = tf.zeros([batch_size, this.state.img_size, this.state.img_size, 3])
-        const y = tf.zeros([batch_size, 2])
-        try{
-            await model.fit(x, y, {batchSize: batch_size, epochs: 1, shuffle: false})
-        }catch(error){
-            console.warn("No se pudo precompilar el entrenamiento:", error)
-        }finally{
-            x.dispose()
-            y.dispose()
-            model.dispose()
-        }
     }
 
     // Save/Load State functionality
@@ -523,6 +506,7 @@ class KinderNet extends React.Component{
         this.classify_timer = setTimeout(this.handleTimerOut, base_timer)
     }
     handleTransitionEnd(){
+        clearTimeout(this.output_timer)
         this.setState({output_on: -1})
     }
     handleTrain(category){
@@ -697,6 +681,9 @@ class KinderNet extends React.Component{
         window[set + '_labels'] = labels
 
         this.setState({n_samples, output_on: category, images})
+        // si la animación no termina de avisar (hilo bloqueado, pestaña oculta), la neurona se libera igual
+        clearTimeout(this.output_timer)
+        this.output_timer = setTimeout(this.handleTransitionEnd, 1500)
         this.scheduleTraining()
     }
 
