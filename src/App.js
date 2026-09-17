@@ -10,7 +10,7 @@ import FolderOpenIcon from '@mui/icons-material/FolderOpen';
 import CategoryList from "./CategoryList"
 import ImagesList from "./ImagesList"
 import { Network } from './NeuralNetwork';
-import {height, unit_sep, use_timer, base_timer, batch_size, train_epochs, train_debounce, use_shape_uniforms, feature_chunk, data_tensors} from './constants';
+import {height, unit_sep, use_timer, base_timer, batch_size, train_epochs, train_debounce, use_shape_uniforms, feature_chunk, data_tensors, bn_momentum} from './constants';
 import Avatar from '@mui/material/Avatar';
 import logo from "./ia.png"
 import sinclogo from "./sinc-logo.png"
@@ -105,11 +105,13 @@ class KinderNet extends React.Component{
         
         let classifier = tf.sequential();
         if(net_size === 0){
-            classifier.add(tf.layers.conv2d({filters: 16, kernelSize: 3, activation: 'relu', inputShape: [this.state.img_size, this.state.img_size, 3]}))
-            classifier.add(tf.layers.batchNormalization())
+            // los píxeles entran en 0-255 y la red los lleva a 0-1
+            classifier.add(tf.layers.rescaling({scale: 1/255, inputShape: [this.state.img_size, this.state.img_size, 3]}))
+            classifier.add(tf.layers.conv2d({filters: 16, kernelSize: 3, activation: 'relu'}))
+            classifier.add(tf.layers.batchNormalization({momentum: bn_momentum}))
             classifier.add(tf.layers.maxPooling2d({poolSize: 2}))
             classifier.add(tf.layers.conv2d({filters: 32, kernelSize: 5, activation: 'relu'}))
-            classifier.add(tf.layers.batchNormalization())
+            classifier.add(tf.layers.batchNormalization({momentum: bn_momentum}))
             classifier.add(tf.layers.maxPooling2d({poolSize: 2}))
             classifier.add(tf.layers.flatten())
             classifier.add(tf.layers.dense({units: nclasses, activation: 'softmax'}))
