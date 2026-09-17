@@ -10,7 +10,7 @@ import FolderOpenIcon from '@mui/icons-material/FolderOpen';
 import CategoryList from "./CategoryList"
 import ImagesList from "./ImagesList"
 import { Network } from './NeuralNetwork';
-import {height, unit_sep, use_timer, base_timer, batch_size, train_epochs, train_debounce, use_shape_uniforms, feature_chunk} from './constants';
+import {height, unit_sep, use_timer, base_timer, batch_size, train_epochs, train_debounce, use_shape_uniforms, feature_chunk, data_tensors} from './constants';
 import Avatar from '@mui/material/Avatar';
 import logo from "./ia.png"
 import sinclogo from "./sinc-logo.png"
@@ -20,8 +20,6 @@ import * as mobilenet from '@tensorflow-models/mobilenet';
 
 var TEST_SAMPLES = 2
 var MIN_SAMPLES = 5
-// tensores globales con las imágenes, los rasgos de MobileNet y las etiquetas de cada conjunto
-const DATA_TENSORS = ['train_tensors', 'train_features', 'train_labels', 'test_tensors', 'test_features', 'test_labels']
 
 // elegido por el usuario o, por defecto, activado en máquinas modestas
 function defaultLowPerfMode(){
@@ -149,7 +147,7 @@ class KinderNet extends React.Component{
 
     resetValues(){
         this.cancelScheduledTraining()
-        DATA_TENSORS.forEach(name => this.disposeLater(window[name]))
+        data_tensors.forEach(name => this.disposeLater(window[name]))
         window.train_tensors = tf.zeros([0, this.state.img_size, this.state.img_size, 3])
         window.train_features = tf.zeros([0, 1024])
         window.train_labels = tf.zeros([0, 2])
@@ -287,7 +285,7 @@ class KinderNet extends React.Component{
 
             // Liberar tensores y modelo anteriores
             this.cancelScheduledTraining()
-            DATA_TENSORS.forEach(name => this.disposeLater(window[name]))
+            data_tensors.forEach(name => this.disposeLater(window[name]))
             if (window.classifier) {
                 window.classifier.stopTraining = true
                 this.disposeLater(window.classifier)

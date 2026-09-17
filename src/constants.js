@@ -18,3 +18,5 @@ export const train_epochs = 10
 export const train_debounce = 1500      // ms sin fotos nuevas antes de entrenar
 export const use_shape_uniforms = false // WEBGL_USE_SHAPES_UNIFORMS (opcional; con lotes fijos casi no hace falta)
 export const feature_chunk = 4          // fotos por tanda al calcular rasgos de MobileNet
+// tensores globales con las imágenes, los rasgos de MobileNet y las etiquetas de cada conjunto
+export const data_tensors = ['train_tensors', 'train_features', 'train_labels', 'test_tensors', 'test_features', 'test_labels']
