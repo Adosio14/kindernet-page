@@ -450,16 +450,24 @@ class KinderNet extends React.Component{
     }
 
     removeCategoryFromSet(set, category){
-        const old = [window[set + '_tensors'], window[set + '_features'], window[set + '_labels']]
-        if(!old[2]) return
-        const labels_data = old[2].arraySync()
+        const labels = window[set + '_labels'].arraySync()
         const rows = []
-        for(let i = 0; i < labels_data.length; i++)
-            if(labels_data[i][category] === 0) rows.push(i)
-        const cols = Array.from(Array(old[2].shape[1]).keys()).filter(x => x !== category)
+        for(let i = 0; i < labels.length; i++)
+            if(labels[i][category] === 0) rows.push(i)
+        this.keepRowsInSet(set, rows, category)
+    }
+
+    // deja solo las filas `rows` del conjunto; con `drop_column` saca esa columna de las etiquetas
+    keepRowsInSet(set, rows, drop_column = -1){
+        const old = [window[set + '_tensors'], window[set + '_features'], window[set + '_labels']]
+        const gather = (x, r) => r.length > 0 ? x.gather(tf.tensor1d(r, 'int32')) : tf.zeros([0, ...x.shape.slice(1)])
         const [tensors, features, labels] = tf.tidy(() => {
-            const r = tf.tensor1d(rows, 'int32')
-            return [old[0].gather(r), old[1].gather(r), old[2].gather(r).gather(tf.tensor1d(cols, 'int32'), 1)]
+            let labels = gather(old[2], rows)
+            if(drop_column !== -1){
+                const cols = Array.from(Array(old[2].shape[1]).keys()).filter(c => c !== drop_column)
+                labels = rows.length > 0 ? labels.gather(tf.tensor1d(cols, 'int32'), 1) : tf.zeros([0, cols.length])
+            }
+            return [gather(old[0], rows), gather(old[1], rows), labels]
         })
         old.forEach(t => this.disposeLater(t))
         window[set + '_tensors'] = tensors
@@ -468,119 +476,30 @@ class KinderNet extends React.Component{
     }
 
     handleDeleteImage(category, imageIndex){
-        // No permitir eliminar si no hay imágenes
-        if(this.state.n_samples[category] === 0 || imageIndex >= this.state.n_samples[category]){
+        if(this.state.n_samples[category] === 0 || imageIndex >= this.state.n_samples[category])
             return
-        }
 
         let images = this.state.images
         let n_samples = this.state.n_samples
 
-        // Determinar si la imagen está en test o train
-        const isTestImage = imageIndex < TEST_SAMPLES
+        // por categoría, primero van las fotos de prueba y después las de entrenamiento
+        const test_labels = window.test_labels.arraySync()
+        const n_test = test_labels.filter(label => label[category] === 1).length
+        const set = imageIndex < n_test ? 'test' : 'train'
+        const position = imageIndex < n_test ? imageIndex : imageIndex - n_test
+        const labels = set === 'test' ? test_labels : window.train_labels.arraySync()
+        let row = -1, count = 0
+        for(let i = 0; i < labels.length && row === -1; i++){
+            if(labels[i][category] !== 1) continue
+            if(count === position) row = i
+            count++
+        }
+        if(row !== -1)
+            this.keepRowsInSet(set, Array.from(Array(labels.length).keys()).filter(i => i !== row))
 
-        // Eliminar la imagen del array
         images[category].splice(imageIndex, 1)
         n_samples[category] -= 1
-
-        // Calcular el índice en los tensores correspondientes
-        // Primero contar cuántas imágenes de test/train hay en categorías anteriores
-        let testTensorIndex = 0
-        let trainTensorIndex = 0
-
-        for(let cat = 0; cat < category; cat++){
-            const catSamples = this.state.n_samples[cat]
-            for(let i = 0; i < catSamples; i++){
-                if(i < TEST_SAMPLES){
-                    testTensorIndex++
-                } else {
-                    trainTensorIndex++
-                }
-            }
-        }
-
-        // Agregar el offset dentro de la categoría actual
-        if(isTestImage){
-            testTensorIndex += imageIndex
-        } else {
-            trainTensorIndex += (imageIndex - TEST_SAMPLES)
-        }
-
-        // Eliminar de los tensores correspondientes usando gather
-        // No usar tf.tidy() aquí porque estamos asignando a variables globales
-        if(isTestImage && window.test_tensors && window.test_tensors.shape[0] > testTensorIndex && testTensorIndex >= 0){
-            const totalTest = window.test_tensors.shape[0]
-            const indices = Array.from(Array(totalTest).keys())
-                .filter(i => i !== testTensorIndex)
-
-            if(indices.length > 0){
-                const indicesTensor = tf.tensor1d(indices, 'int32')
-                // Crear nuevos tensores primero
-                const oldTestTensors = window.test_tensors
-                const oldTestFeatures = window.test_features
-                const oldTestLabels = window.test_labels
-
-                window.test_tensors = oldTestTensors.gather(indicesTensor)
-                window.test_features = oldTestFeatures.gather(indicesTensor)
-                window.test_labels = oldTestLabels.gather(indicesTensor)
-
-                // Dispose de los tensores antiguos
-                this.disposeLater(oldTestTensors)
-                this.disposeLater(oldTestFeatures)
-                this.disposeLater(oldTestLabels)
-                indicesTensor.dispose()
-            } else {
-                // Si no quedan elementos, crear tensores vacíos
-                this.disposeLater(window.test_tensors)
-                this.disposeLater(window.test_features)
-                this.disposeLater(window.test_labels)
-
-                window.test_tensors = tf.zeros([0, this.state.img_size, this.state.img_size, 3])
-                window.test_features = tf.zeros([0, 1024])
-                window.test_labels = tf.zeros([0, this.state.category_names.length])
-            }
-        }
-
-        if(!isTestImage && window.train_tensors && window.train_tensors.shape[0] > trainTensorIndex && trainTensorIndex >= 0){
-            const totalTrain = window.train_tensors.shape[0]
-            const indices = Array.from(Array(totalTrain).keys())
-                .filter(i => i !== trainTensorIndex)
-
-            if(indices.length > 0){
-                const indicesTensor = tf.tensor1d(indices, 'int32')
-                // Crear nuevos tensores primero
-                const oldTrainTensors = window.train_tensors
-                const oldTrainFeatures = window.train_features
-                const oldTrainLabels = window.train_labels
-
-                window.train_tensors = oldTrainTensors.gather(indicesTensor)
-                window.train_features = oldTrainFeatures.gather(indicesTensor)
-                window.train_labels = oldTrainLabels.gather(indicesTensor)
-
-                // Dispose de los tensores antiguos
-                this.disposeLater(oldTrainTensors)
-                this.disposeLater(oldTrainFeatures)
-                this.disposeLater(oldTrainLabels)
-                indicesTensor.dispose()
-            } else {
-                this.disposeLater(window.train_tensors)
-                this.disposeLater(window.train_features)
-                this.disposeLater(window.train_labels)
-
-                window.train_tensors = tf.zeros([0, this.state.img_size, this.state.img_size, 3])
-                window.train_features = tf.zeros([0, 1024])
-                window.train_labels = tf.zeros([0, this.state.category_names.length])
-            }
-        }
-
-        // Resetear accuracy ya que el modelo necesita reentrenarse
-        this.setState({
-            images: images,
-            n_samples: n_samples,
-            accuracy: Array(this.state.category_names.length).fill(0)
-        })
-
-        // Reentrenar (con debounce)
+        this.setState({images, n_samples, accuracy: Array(this.state.category_names.length).fill(0)})
         this.scheduleTraining()
     }
 
