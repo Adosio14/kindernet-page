@@ -23,6 +23,14 @@ var MIN_SAMPLES = 5
 // tensores globales con las imágenes, los rasgos de MobileNet y las etiquetas de cada conjunto
 const DATA_TENSORS = ['train_tensors', 'train_features', 'train_labels', 'test_tensors', 'test_features', 'test_labels']
 
+// elegido por el usuario o, por defecto, activado en máquinas modestas
+function defaultLowPerfMode(){
+    const saved = localStorage.getItem('kindernet_low_perf')
+    if(saved !== null)
+        return saved === 'true'
+    return Boolean((navigator.deviceMemory && navigator.deviceMemory <= 4) || (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 2))
+}
+
 // event listener
 class EventListener extends React.Component{
     componentDidMount() {
@@ -43,6 +51,7 @@ class KinderNet extends React.Component{
         this.state={
             img_size: 64,
             is_training: false,
+            low_perf: defaultLowPerfMode(),
             category: -1,
             classifying: false,
             net_size: 0, // mayor valor, mas compleja la red
@@ -84,6 +93,8 @@ class KinderNet extends React.Component{
         this.handleSaveState = this.handleSaveState.bind(this);
         this.handleLoadState = this.handleLoadState.bind(this);
         this.handleDeleteSavedState = this.handleDeleteSavedState.bind(this);
+        this.handleLowPerfChange = this.handleLowPerfChange.bind(this);
+        this.handleTrainNow = this.handleTrainNow.bind(this);
         
         this.classifyPic = this.classifyPic.bind(this);
     }
@@ -168,7 +179,8 @@ class KinderNet extends React.Component{
         mobilenet.load().then((net) => {
             window.mobilenet = net
             this.setState({listen_keys: true})
-            this.warmUp()
+            if(!this.state.low_perf)
+                this.warmUp()
         })
 
         this.resetValues()
@@ -557,6 +569,8 @@ class KinderNet extends React.Component{
 
     scheduleTraining(){
         clearTimeout(this.train_timer)
+        if(this.state.low_perf)
+            return
         this.train_timer = setTimeout(() => this.trainClassifier(), train_debounce)
     }
 
@@ -686,6 +700,16 @@ class KinderNet extends React.Component{
         this.scheduleTraining()
     }
 
+    handleLowPerfChange(enabled){
+        localStorage.setItem('kindernet_low_perf', enabled)
+        this.setState({low_perf: enabled}, () => enabled ? this.cancelScheduledTraining() : this.scheduleTraining())
+    }
+
+    handleTrainNow(){
+        this.cancelScheduledTraining()
+        this.trainClassifier()
+    }
+
     captureGlobalEvent(e) {
         if(this.state.listen_keys){
             // entrenamiento
@@ -788,6 +812,10 @@ class KinderNet extends React.Component{
                             <br/> <br/>
 
                             Podés sumar más cosas haciendo click en el botón <AddIcon/> a la derecha. También podés borrar una cosas haciendo click en el botón <DeleteIcon/>. Refrescando la página (F5) se borra todo y se vuelve a empezar. 
+
+                            <br/> <br/>
+
+                            Si la computadora es lenta, activá "Modo bajo rendimiento" en el panel de control: las fotos se guardan sin entrenar y la red aprende una sola vez cuando tocás el botón Entrenar.
 
                             
 
@@ -902,6 +930,18 @@ class KinderNet extends React.Component{
                                     <FormControlLabel value="Grande" control={<Radio onChange={()=>{this.handleClassifierChange(2)}}/>} 
                                     label="Grande" />
                                 </RadioGroup>
+                            </Grid>
+                            <Grid container justifyContent='center' alignItems='center' direction='column' pb={1}>
+                                <FormControlLabel control={<Switch checked={this.state.low_perf} onChange={(e)=>{this.handleLowPerfChange(e.target.checked)}}/>}
+                                    label="Modo bajo rendimiento" />
+                                {this.state.low_perf &&
+                                    <Typography variant="caption" color="text.secondary" px={2}>Las fotos se guardan sin entrenar. Cuando termines, tocá Entrenar.</Typography>}
+                                {this.state.low_perf &&
+                                    <Button variant="contained" onClick={this.handleTrainNow} disabled={!this.enoughSamples() || this.state.is_training} sx={{mt: 1}}>
+                                        {this.state.is_training ? "Aprendiendo..." : "Entrenar"}
+                                    </Button>}
+                                {this.state.low_perf && !this.enoughSamples() &&
+                                    <Typography variant="caption" color="text.secondary">Cada cosa necesita al menos {MIN_SAMPLES} fotos</Typography>}
                             </Grid> 
                         </Card>
                         
