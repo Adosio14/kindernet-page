@@ -18,6 +18,7 @@ export const train_epochs = 20          // con pocas fotos, BatchNormalization n
 export const bn_momentum = 0.8          // más bajo que el 0.99 por defecto: los promedios convergen en pocos pasos
 export const train_debounce = 1500      // ms sin fotos nuevas antes de entrenar
 export const use_shape_uniforms = true  // WEBGL_USE_SHAPES_UNIFORMS: ~70% menos shaders para compilar
+export const capture_cooldown = 300     // ms mínimos entre fotos (antes se esperaba toda la animación)
 export const feature_chunk = 4          // fotos por tanda al calcular rasgos de MobileNet
 // tensores globales con las imágenes, los rasgos de MobileNet y las etiquetas de cada conjunto
 export const data_tensors = ['train_tensors', 'train_features', 'train_labels', 'test_tensors', 'test_features', 'test_labels']

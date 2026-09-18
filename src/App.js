@@ -10,7 +10,7 @@ import FolderOpenIcon from '@mui/icons-material/FolderOpen';
 import CategoryList from "./CategoryList"
 import ImagesList from "./ImagesList"
 import { Network } from './NeuralNetwork';
-import {height, unit_sep, use_timer, base_timer, batch_size, train_epochs, train_debounce, use_shape_uniforms, feature_chunk, data_tensors, bn_momentum} from './constants';
+import {height, unit_sep, use_timer, base_timer, batch_size, train_epochs, train_debounce, use_shape_uniforms, feature_chunk, data_tensors, bn_momentum, capture_cooldown} from './constants';
 import Avatar from '@mui/material/Avatar';
 import logo from "./ia.png"
 import sinclogo from "./sinc-logo.png"
@@ -77,6 +77,7 @@ class KinderNet extends React.Component{
         this.train_timer = null
         this.classify_timer = null
         this.output_timer = null
+        this.last_pic = 0
         this.pending_dispose = []
         this.captureGlobalEvent = this.captureGlobalEvent.bind(this);
         this.handleTransitionEnd = this.handleTransitionEnd.bind(this);
@@ -657,11 +658,14 @@ class KinderNet extends React.Component{
     }
 
     addPic(category){
-        if(this.state.output_on !== -1)
+        // cooldown corto: antes se esperaba toda la animación de la neurona y en una ráfaga se perdían fotos
+        const now = Date.now()
+        if(now - this.last_pic < capture_cooldown)
             return
         const frame = this.captureFrame()
         if(!frame)
             return
+        this.last_pic = now
 
         let images = this.state.images
         let n_samples = this.state.n_samples
@@ -680,7 +684,8 @@ class KinderNet extends React.Component{
         window[set + '_tensors'] = tensors
         window[set + '_labels'] = labels
 
-        this.setState({n_samples, output_on: category, images})
+        // output_on: -1 y después la categoría, para que la animación se reinicie en fotos seguidas
+        this.setState({n_samples, images, output_on: -1}, () => this.setState({output_on: category}))
         clearTimeout(this.output_timer)
         this.output_timer = setTimeout(this.handleTransitionEnd, 1500)
         this.scheduleTraining()
