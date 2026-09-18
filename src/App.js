@@ -68,7 +68,8 @@ class KinderNet extends React.Component{
             save_state: false,
             load_state: false,
             saved_states: [],
-            save_name: ""
+            save_name: "",
+            gpu_error: false
         };
         this.response = null
         // estado del entrenamiento (fuera de this.state: setState es asíncrono)
@@ -78,6 +79,7 @@ class KinderNet extends React.Component{
         this.classify_timer = null
         this.output_timer = null
         this.last_pic = 0
+        this.gpu_recovery_tried = false
         this.pending_dispose = []
         this.captureGlobalEvent = this.captureGlobalEvent.bind(this);
         this.handleTransitionEnd = this.handleTransitionEnd.bind(this);
@@ -135,6 +137,101 @@ class KinderNet extends React.Component{
         window.classifier = this.defineNet(net_size, nclasses)
     }
 
+    // La GPU puede dejar de devolver resultados sin avisar (ni error ni contexto perdido): todo se lee como cero.
+    // Esta sonda lo detecta; sin ella la app muestra 0% como si la red no hubiera aprendido nada.
+    gpuIsHealthy(){
+        let healthy = false
+        try{
+            healthy = tf.tidy(() => tf.tensor1d([1, 2, 3]).square().sum().arraySync() === 14)
+        }catch(error){
+            console.error("Error al comprobar la GPU:", error)
+        }
+        if(!healthy)
+            console.error("Diagnóstico de la GPU:", JSON.stringify(this.gpuDiagnostics()))
+        return healthy
+    }
+
+    gpuDiagnostics(){
+        const flags = ['WEBGL_VERSION', 'WEBGL_RENDER_FLOAT32_ENABLED', 'WEBGL_DOWNLOAD_FLOAT_ENABLED',
+            'WEBGL_FORCE_F16_TEXTURES', 'WEBGL_BUFFER_SUPPORTED', 'WEBGL_FENCE_API_ENABLED', 'WEBGL_PACK']
+        const info = {backend: tf.getBackend(), memoria: tf.memory().numTensors}
+        flags.forEach(f => { try{ info[f] = tf.env().get(f) }catch(error){ info[f] = 'error' } })
+        try{
+            const gl = tf.backend().gpgpu.gl
+            info.contextLost = gl.isContextLost()
+            info.glError = gl.getError()
+            const ext = gl.getExtension('WEBGL_debug_renderer_info')
+            info.renderer = ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : 'desconocido'
+        }catch(error){
+            info.gl = 'sin acceso al contexto'
+        }
+        return info
+    }
+
+    // Recrea el backend y rearma los datos desde las fotos guardadas. Devuelve false si no se pudo recuperar.
+    async recoverFromGpuFailure(){
+        console.warn("La GPU dejó de devolver resultados: recreando el backend")
+        this.cancelScheduledTraining()
+        this.pending_dispose = []
+        try{
+            const factory = tf.findBackendFactory('webgl')
+            tf.removeBackend('webgl')
+            if(factory)
+                tf.registerBackend('webgl', factory, 2)
+            await tf.setBackend(factory ? 'webgl' : 'cpu')
+            await tf.ready()
+        }catch(error){
+            console.error("No se pudo recrear el backend:", error)
+            return false
+        }
+        if(!this.gpuIsHealthy())
+            return false
+        window.classifier = this.defineNet(this.state.net_size, this.state.category_names.length)
+        await this.rebuildFromImages()
+        return this.gpuIsHealthy()
+    }
+
+    // Rearma los tensores desde los PNG del estado. Los anteriores ya murieron con el backend, no se liberan.
+    async rebuildFromImages(){
+        const size = this.state.img_size
+        const nclasses = this.state.category_names.length
+        const frames = {train: [], test: []}
+        for(let cat = 0; cat < this.state.images.length; cat++)
+            for(let i = 0; i < this.state.images[cat].length; i++)
+                frames[i < TEST_SAMPLES ? 'test' : 'train'].push({data: await this.decodeImage(this.state.images[cat][i], size), cat})
+
+        for(const set of ['train', 'test']){
+            window[set + '_features'] = tf.zeros([0, 1024])
+            if(frames[set].length === 0){
+                window[set + '_tensors'] = tf.zeros([0, size, size, 3])
+                window[set + '_labels'] = tf.zeros([0, nclasses])
+                continue
+            }
+            const [tensors, labels] = tf.tidy(() => [
+                tf.stack(frames[set].map(f => tf.browser.fromPixels(f.data).toFloat())),
+                tf.oneHot(frames[set].map(f => f.cat), nclasses).toFloat()
+            ])
+            window[set + '_tensors'] = tensors
+            window[set + '_labels'] = labels
+        }
+    }
+
+    decodeImage(dataUrl, size){
+        return new Promise((resolve, reject) => {
+            const image = new Image()
+            image.onload = () => {
+                const canvas = document.createElement('canvas')
+                canvas.width = size
+                canvas.height = size
+                const context = canvas.getContext('2d')
+                context.drawImage(image, 0, 0, size, size)
+                resolve(context.getImageData(0, 0, size, size))
+            }
+            image.onerror = reject
+            image.src = dataUrl
+        })
+    }
+
     // libera un tensor o modelo; si hay un fit() en curso, lo difiere hasta que termine
     disposeLater(x){
         if(!x) return
@@ -180,7 +277,7 @@ class KinderNet extends React.Component{
 
         mobilenet.load().then((net) => {
             window.mobilenet = net
-            this.setState({listen_keys: true})
+            this.setState({listen_keys: true, gpu_error: !this.gpuIsHealthy()})
         })
 
         this.resetValues()
@@ -604,8 +701,17 @@ class KinderNet extends React.Component{
         try{
             await model.fit(train_x, train_y, {batchSize: batch_size, epochs: train_epochs, shuffle: true})
             // si la red cambió durante el fit, el resultado ya no sirve
-            if(model === window.classifier)
-                this.setState({accuracy: this.evaluate(model, net_size)})
+            if(model === window.classifier){
+                if(this.gpuIsHealthy())
+                    this.setState({accuracy: this.evaluate(model, net_size), gpu_error: false})
+                else{
+                    // se intenta recuperar una sola vez: si vuelve a fallar, no tiene sentido insistir
+                    const recovered = !this.gpu_recovery_tried && await this.recoverFromGpuFailure()
+                    this.gpu_recovery_tried = true
+                    this.setState({gpu_error: !recovered})
+                    this.train_pending = recovered
+                }
+            }
         }catch(error){
             console.error("Error durante el entrenamiento:", error)
         }finally{
@@ -946,6 +1052,11 @@ class KinderNet extends React.Component{
                             classifying = {this.state.classifying} />        
                          
                         <h1>{pred_message}</h1>
+                        {this.state.gpu_error &&
+                            <Typography color="error" px={2}>
+                                El navegador dejó de responder en la placa de video, así que la red no puede aprender.
+                                Recargá la página (F5) y, si vuelve a pasar, activá "Modo bajo rendimiento".
+                            </Typography>}
             
                     </Grid>
 
