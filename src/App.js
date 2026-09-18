@@ -681,7 +681,6 @@ class KinderNet extends React.Component{
         window[set + '_labels'] = labels
 
         this.setState({n_samples, output_on: category, images})
-        // si la animación no termina de avisar (hilo bloqueado, pestaña oculta), la neurona se libera igual
         clearTimeout(this.output_timer)
         this.output_timer = setTimeout(this.handleTransitionEnd, 1500)
         this.scheduleTraining()
@@ -941,7 +940,7 @@ class KinderNet extends React.Component{
                             size = {this.state.net_size} n_outputs = {this.state.category_names.length}
                             classifying = {this.state.classifying} />        
                          
-                        <h1>{pred_message}</h1>   
+                        <h1>{pred_message}</h1>
             
                     </Grid>
 
